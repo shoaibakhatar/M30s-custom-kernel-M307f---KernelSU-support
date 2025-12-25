@@ -1,0 +1,141 @@
+name: Apatch M30s Kernel (M307F)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    env:
+      ARCH: arm64
+      PLATFORM_VERSION: "11"
+      ANDROID_MAJOR_VERSION: "r"
+      CONFIG_SECTION_MISMATCH_WARN_ONLY: "y"
+
+      AOSP_CLANG_TAR_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-9.0.0_r6/clang-4639204.tar.gz"
+      CROSS_COMPILE: "aarch64-linux-gnu-"
+      CLANG_TRIPLE: "aarch64-linux-gnu-"
+
+      CCACHE_DIR: "${{ github.workspace }}/.ccache"
+      CCACHE_COMPRESS: "true"
+      CCACHE_MAXSIZE: "2G"
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends software-properties-common
+          sudo add-apt-repository -y universe
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex make gcc g++ \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev \
+            libtinfo5 libncurses5 \
+            python3 python3-pip \
+            git curl wget rsync \
+            ccache \
+            lz4 xz-utils zip unzip \
+            dwarves
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.ref_name }}-
+            ccache-${{ runner.os }}-
+
+      - name: Download AOSP Clang (clang-4639204)
+        run: |
+          set -e
+          mkdir -p "${GITHUB_WORKSPACE}/toolchains/clang-4639204"
+          curl -L "${AOSP_CLANG_TAR_URL}" -o /tmp/clang-4639204.tar.gz
+          tar -xzf /tmp/clang-4639204.tar.gz -C "${GITHUB_WORKSPACE}/toolchains/clang-4639204"
+          test -f "${GITHUB_WORKSPACE}/toolchains/clang-4639204/bin/clang"
+          echo "${GITHUB_WORKSPACE}/toolchains/clang-4639204/bin" >> "$GITHUB_PATH"
+
+      - name: Show tool versions
+        run: |
+          which clang || true
+          clang --version || true
+          ${CROSS_COMPILE}gcc --version || true
+          make --version
+
+      - name: Configure (apa_ksu_defconfig)
+        run: |
+          set -e
+          export ARCH="${ARCH}"
+
+          # Use your APatch-ready defconfig
+          make ARCH="${ARCH}" apa_ksu_defconfig
+
+          # Keep KernelSU pieces built (your tree has ksu_* hooks in core code)
+          ./scripts/config --file .config -e OVERLAY_FS -e KSU || true
+
+          # APatch / KernelPatch wants kallsyms
+          ./scripts/config --file .config -e KALLSYMS -e KALLSYMS_ALL || true
+
+          make ARCH="${ARCH}" olddefconfig
+
+          echo "=== CONFIG CHECK ==="
+          grep -nE "^(CONFIG_KSU=|CONFIG_OVERLAY_FS=|CONFIG_KALLSYMS=|CONFIG_KALLSYMS_ALL=)" .config || true
+
+
+      - name: Build kernel
+        run: |
+          set -e
+          export ARCH="${ARCH}"
+          export CC="clang"
+          export CROSS_COMPILE="${CROSS_COMPILE}"
+          export CLANG_TRIPLE="${CLANG_TRIPLE}"
+
+          export USE_CCACHE=1
+          ccache -z || true
+
+          make ARCH="${ARCH}" -j"$(nproc)" \
+            CC="${CC}" \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            CLANG_TRIPLE="${CLANG_TRIPLE}"
+
+          ccache -s || true
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          OUT="${GITHUB_WORKSPACE}/out"
+          mkdir -p "${OUT}"
+
+          if [ -f "arch/arm64/boot/Image" ]; then
+            cp -v "arch/arm64/boot/Image" "${OUT}/Image"
+          else
+            echo "ERROR: arch/arm64/boot/Image not found"
+            find arch/arm64/boot -maxdepth 3 -type f -print || true
+            exit 1
+          fi
+
+          find arch/arm64/boot -maxdepth 3 -type f \( -name "*.dtb" -o -name "*.dtbo" -o -name "dtb.img" -o -name "dtbo.img" \) \
+            -exec cp -v --parents "{}" "${OUT}/" \; || true
+
+          find drivers -type f -name "*.ko" -exec cp -v --parents "{}" "${OUT}/" \; || true
+
+          cd "${OUT}"
+          tar -czf "${GITHUB_WORKSPACE}/kernel-build-${GITHUB_RUN_NUMBER}.tar.gz" .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build-${{ github.run_number }}
+          path: kernel-build-${{ github.run_number }}.tar.gz
