@@ -5725,3 +5725,27 @@ CONFIG_SCHED_KAIR_GLUE=y
 CONFIG_FPSIMD_CORRUPTION_DETECT=y
 # KernelSU
 CONFIG_KSU=y
+# ---- APatch / KernelPatch needs kallsyms ----
+CONFIG_KALLSYMS=y
+CONFIG_KALLSYMS_ALL=y
+
+# ---- Disable Knox / Samsung security bits (like Mesa commit) ----
+# Hypervisor / Knox
+# CONFIG_UH is not set
+# CONFIG_RKP is not set
+# CONFIG_KDP is not set
+# CONFIG_KDP_CRED is not set
+# CONFIG_KDP_NS is not set
+# CONFIG_KNOX_NCM is not set
+
+# Samsung security / hardening
+# CONFIG_HDM is not set
+# CONFIG_SECURITY_DEFEX is not set
+# CONFIG_PROCA is not set
+# CONFIG_PROCA_GKI_10 is not set
+# CONFIG_PROCA_S_OS is not set
+# CONFIG_GAF is not set
+# CONFIG_GAF_V6 is not set
+# CONFIG_SECURITY_DSMS is not set
+# CONFIG_FIVE is not set
+# CONFIG_FIVE_GKI_10 is not set
