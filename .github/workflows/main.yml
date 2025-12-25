@@ -1,0 +1,130 @@
+name: Build M30s Kernel (M307F) - KernelSU
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    env:
+      ARCH: arm64
+      PLATFORM_VERSION: "11"
+      ANDROID_MAJOR_VERSION: "r"
+      CONFIG_SECTION_MISMATCH_WARN_ONLY: "y"
+
+      # Toolchain config
+      AOSP_CLANG_TAR_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-9.0.0_r6/clang-4639204.tar.gz"
+      CROSS_COMPILE: "aarch64-linux-gnu-"
+      CLANG_TRIPLE: "aarch64-linux-gnu-"
+
+      # ccache (optional but speeds up rebuilds)
+      CCACHE_DIR: "${{ github.workspace }}/.ccache"
+      CCACHE_COMPRESS: "true"
+      CCACHE_MAXSIZE: "2G"
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex make gcc g++ \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            libssl-dev libelf-dev \
+            python3 python3-pip \
+            git curl wget rsync \
+            ccache \
+            lz4 xz-utils zip unzip \
+            dwarves
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.ref_name }}-
+            ccache-${{ runner.os }}-
+
+      - name: Download AOSP Clang (clang-4639204)
+        run: |
+          set -e
+          mkdir -p "${GITHUB_WORKSPACE}/toolchains/clang-4639204"
+          curl -L "${AOSP_CLANG_TAR_URL}" -o /tmp/clang-4639204.tar.gz
+          tar -xzf /tmp/clang-4639204.tar.gz -C "${GITHUB_WORKSPACE}/toolchains/clang-4639204"
+          echo "${GITHUB_WORKSPACE}/toolchains/clang-4639204/bin" >> "$GITHUB_PATH"
+
+      - name: Show tool versions
+        run: |
+          which clang || true
+          clang --version || true
+          ${CROSS_COMPILE}gcc --version || true
+          make --version
+
+      - name: Configure (defconfig)
+        run: |
+          export ARCH="${ARCH}"
+          make ARCH="${ARCH}" exynos9610-m30sdd_defconfig
+
+      - name: Build kernel
+        run: |
+          set -e
+          export ARCH="${ARCH}"
+          export CC="clang"
+          export CROSS_COMPILE="${CROSS_COMPILE}"
+          export CLANG_TRIPLE="${CLANG_TRIPLE}"
+
+          # Use ccache with clang if available
+          export USE_CCACHE=1
+          ccache -z || true
+
+          make ARCH="${ARCH}" -j"$(nproc)" \
+            CC="${CC}" \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            CLANG_TRIPLE="${CLANG_TRIPLE}"
+
+          ccache -s || true
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          OUT="${GITHUB_WORKSPACE}/out"
+          mkdir -p "${OUT}"
+
+          # Kernel Image (as per README)
+          if [ -f "arch/arm64/boot/Image" ]; then
+            cp -v "arch/arm64/boot/Image" "${OUT}/Image"
+          else
+            echo "ERROR: arch/arm64/boot/Image not found"
+            find arch/arm64/boot -maxdepth 3 -type f -print || true
+            exit 1
+          fi
+
+          # Optional: dtb/dtbo if present (varies by kernel tree)
+          find arch/arm64/boot -maxdepth 3 -type f \( -name "*.dtb" -o -name "*.dtbo" -o -name "dtb.img" -o -name "dtbo.img" \) \
+            -exec cp -v --parents "{}" "${OUT}/" \; || true
+
+          # Modules (as per README: drivers/*/*.ko)
+          find drivers -type f -name "*.ko" -exec cp -v --parents "{}" "${OUT}/" \; || true
+
+          # Package
+          cd "${OUT}"
+          tar -czf "${GITHUB_WORKSPACE}/kernel-build-${GITHUB_RUN_NUMBER}.tar.gz" .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build-${{ github.run_number }}
+          path: |
+            kernel-build-${{ github.run_number }}.tar.gz
+            out/Image
