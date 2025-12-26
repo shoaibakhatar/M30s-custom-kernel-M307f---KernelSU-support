@@ -1868,9 +1868,3 @@ FORCE:
 # Declare the contents of the .PHONY variable as phony.  We keep that
 # information in a variable so we can use it in if_changed and friends.
 .PHONY: $(PHONY)
-
-
-# If KNOX_NCM is disabled, provide stub symbols so net/ can still link.
-ifeq ($(CONFIG_KNOX_NCM),)
-obj-y += knox_ncm_stubs.o
-endif
