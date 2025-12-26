@@ -16,12 +16,10 @@ jobs:
       ANDROID_MAJOR_VERSION: "r"
       CONFIG_SECTION_MISMATCH_WARN_ONLY: "y"
 
-      # Toolchain config
       AOSP_CLANG_TAR_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/android-9.0.0_r6/clang-4639204.tar.gz"
       CROSS_COMPILE: "aarch64-linux-gnu-"
       CLANG_TRIPLE: "aarch64-linux-gnu-"
 
-      # ccache
       CCACHE_DIR: "${{ github.workspace }}/.ccache"
       CCACHE_COMPRESS: "true"
       CCACHE_MAXSIZE: "2G"
@@ -70,9 +68,9 @@ jobs:
 
       - name: Show tool versions
         run: |
-          which clang || true
-          clang --version || true
-          ${CROSS_COMPILE}gcc --version || true
+          which clang
+          clang --version
+          ${CROSS_COMPILE}gcc --version
           make --version
 
       - name: Configure (apa_ksu_defconfig)
@@ -82,16 +80,15 @@ jobs:
 
           make ARCH="${ARCH}" apa_ksu_defconfig
 
-          # Force APatch-style knobs (prevents configs getting re-enabled by fragments)
           ./scripts/config --file .config \
             -e KALLSYMS -e KALLSYMS_ALL \
-            -d KNOX_NCM -d UH -d SECURITY_DEFEX -d GAF -d SECURITY_DSMS -d FIVE \
-            -e OVERLAY_FS -e KSU || true
+            -d UH -d SECURITY_DEFEX -d GAF -d SECURITY_DSMS -d FIVE \
+            -e OVERLAY_FS -e KSU
 
           make ARCH="${ARCH}" olddefconfig
 
           echo "=== CONFIG CHECK ==="
-          grep -nE "^(CONFIG_KALLSYMS=|CONFIG_KALLSYMS_ALL=|CONFIG_KNOX_NCM=|CONFIG_UH=|CONFIG_SECURITY_DEFEX=|CONFIG_GAF=|CONFIG_SECURITY_DSMS=|CONFIG_FIVE=|CONFIG_KSU=|CONFIG_OVERLAY_FS=)" .config || true
+          grep -nE "^(CONFIG_KALLSYMS=|CONFIG_KALLSYMS_ALL=|CONFIG_KNOX_NCM=|# CONFIG_KNOX_NCM is not set|CONFIG_UH=|CONFIG_SECURITY_DEFEX=|CONFIG_GAF=|CONFIG_SECURITY_DSMS=|CONFIG_FIVE=|CONFIG_KSU=|CONFIG_OVERLAY_FS=)" .config || true
 
       - name: Build kernel
         run: |
