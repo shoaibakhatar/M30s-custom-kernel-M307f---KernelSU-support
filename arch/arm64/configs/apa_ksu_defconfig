@@ -5736,7 +5736,6 @@ CONFIG_KALLSYMS_ALL=y
 # CONFIG_KDP is not set
 # CONFIG_KDP_CRED is not set
 # CONFIG_KDP_NS is not set
-# CONFIG_KNOX_NCM is not set
 
 # Samsung security / hardening
 # CONFIG_HDM is not set
